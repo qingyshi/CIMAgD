@@ -17,3 +17,5 @@ Imports:
     Matrix,
     randtoolbox,
     rootSolve
+URL: https://github.com/qingyshi/CIMAgD
+BugReports: https://github.com/qingyshi/CIMAgD/issues
