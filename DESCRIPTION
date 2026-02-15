@@ -1,0 +1,19 @@
+Package: CIMAgD
+Title: Causally-Interpretable Meta-analysis using Aggregate data
+Version: 0.0.1
+Authors@R: 
+    person("Qingyang", "Shi", , "qingyang.shi@rug.nl", role = c("aut", "cre"))
+Description: Implements a new method for causally-interpretable meta-analysis using aggregate data from multiple randomized trials. The method transports treatment effects from trials to a new target population to estimate the average treatment effect. The method estimates the underlying conditional average treatment effect (CATE) function from aggregate data and marginalizes it over the covariates in the target population.
+License: GPL (>= 3)
+Encoding: UTF-8
+Roxygen: list(markdown = TRUE)
+RoxygenNote: 7.3.3
+Suggests: 
+    simstudy,
+    testthat (>= 3.0.0)
+Config/testthat/edition: 3
+Imports: 
+    copula,
+    Matrix,
+    randtoolbox,
+    rootSolve
