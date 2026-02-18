@@ -22,9 +22,8 @@ The CIMAgD package is to implement a new method for the causally-interpretable m
 
 ## Installation
 
-You can install the development version of CIMAgD like so:
+You can install the development version of CIMAgD by:
 
 ``` r
-# install.packages("devtools")
 devtools::install_github("qingyshi/CIMAgD")
 ```

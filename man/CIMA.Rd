@@ -15,7 +15,7 @@ missing values.}
 
 \item{mu}{A list of tilting targets for each trial.}
 
-\item{Q}{A data.frame of covariates that represent a auxiliary distribution.}
+\item{Q}{A data.frame of covariates that represent a base distribution.}
 
 \item{target}{A data.frame of covariates for the target population.}
 

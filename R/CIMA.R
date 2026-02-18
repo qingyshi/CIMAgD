@@ -7,7 +7,7 @@
 #' `seTE` must not contain missing values. Columns `n` and `prop` may contain
 #' missing values.
 #' @param mu A list of tilting targets for each trial.
-#' @param Q A data.frame of covariates that represent a auxiliary distribution.
+#' @param Q A data.frame of covariates that represent a base distribution.
 #' @param target A data.frame of covariates for the target population.
 #' @param formulaCATE A character string of the formula for CATE.
 #' @param formulaTilting A character string of the formula for tilting.

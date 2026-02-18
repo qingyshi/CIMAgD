@@ -12,9 +12,8 @@ causally-interpretable meta-analysis using aggregate data from trials.
 
 ## Installation
 
-You can install the development version of CIMAgD like so:
+You can install the development version of CIMAgD by:
 
 ``` r
-# install.packages("devtools")
 devtools::install_github("qingyshi/CIMAgD")
 ```
