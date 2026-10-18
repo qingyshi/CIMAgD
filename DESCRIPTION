@@ -3,12 +3,8 @@ Title: Causally Interpretable Meta-Analysis Using Aggregate Data
 Version: 0.1.0
 Authors@R:
     person("Qingyang", "Shi", , "qingyang.shi@rug.nl", role = c("aut", "cre"))
-Description: Estimates additive conditional and target-population treatment
-    effects from randomized-trial aggregate reports using exponential tilting
-    and generalized method of moments. Provides identification and tilting-span
-    diagnostics, joint influence-function variance propagation, working
-    covariance reconstruction from arm reports, and single-source Gaussian
-    copula simulation and parametric bootstrap.
+Description: Estimates conditional treatment effects and target-population treatment
+    effects from randomized-trial aggregate reports using generalized method of moments.
 License: AGPL (>= 3)
 Encoding: UTF-8
 LazyData: true
