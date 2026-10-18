@@ -1,21 +1,27 @@
 Package: CIMAgD
-Title: Causally-Interpretable Meta-analysis using Aggregate data
-Version: 0.0.1
-Authors@R: 
+Title: Causally Interpretable Meta-Analysis Using Aggregate Data
+Version: 0.1.0
+Authors@R:
     person("Qingyang", "Shi", , "qingyang.shi@rug.nl", role = c("aut", "cre"))
-Description: Implements a new method for causally-interpretable meta-analysis using aggregate data from multiple randomized trials. The method transports treatment effects from trials to a new target population to estimate the average treatment effect. The method estimates the underlying conditional average treatment effect (CATE) function from aggregate data and marginalizes it over the covariates in the target population.
+Description: Estimates additive conditional and target-population treatment
+    effects from randomized-trial aggregate reports using exponential tilting
+    and generalized method of moments. Provides identification and tilting-span
+    diagnostics, joint influence-function variance propagation, working
+    covariance reconstruction from arm reports, and single-source Gaussian
+    copula simulation and parametric bootstrap.
 License: AGPL (>= 3)
 Encoding: UTF-8
+LazyData: true
 Roxygen: list(markdown = TRUE)
 RoxygenNote: 7.3.3
-Suggests: 
-    simstudy,
+Depends: R (>= 4.1.0)
+Imports:
+    Matrix,
+    quadprog,
+    stats,
+    utils
+Suggests:
     testthat (>= 3.0.0)
 Config/testthat/edition: 3
-Imports: 
-    copula,
-    Matrix,
-    randtoolbox,
-    rootSolve
 URL: https://github.com/qingyshi/CIMAgD
 BugReports: https://github.com/qingyshi/CIMAgD/issues

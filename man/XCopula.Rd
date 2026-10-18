@@ -2,24 +2,23 @@
 % Please edit documentation in R/copula.R
 \name{XCopula}
 \alias{XCopula}
-\title{Gaussian copula model for generating covariates}
+\title{Draw covariates from a single-source Gaussian copula}
 \usage{
-XCopula(summaryX, N = 1000)
+XCopula(summaryX, N = NULL, seed = NULL)
 }
 \arguments{
-\item{summaryX}{A list describing one trial or multiple trials.
-Supported formats are:
-\enumerate{
-\item single-trial list with \code{covariate}, \code{distribution}, \code{sumstats}, and optional \code{n};
-\item multi-trial list in \code{summaryX$trials} (named list of single-trial specs);
-\item named list of single-trial specs.
-}}
+\item{summaryX}{Point-estimate specification, as constructed by
+\code{\link[=copula_summary]{copula_summary()}}. Named marginal lists and marginal tables are accepted.}
 
-\item{N}{Number of samples to generate. Can be scalar or a named vector (for multiple trials).}
+\item{N}{Number of iid draws; defaults to summaryX$n. CIMA's plugin Q always
+uses the original n, irrespective of this standalone simulation option.}
+
+\item{seed}{Optional reproducible seed, restoring the caller's RNG state.}
 }
 \value{
-A data.frame for one trial, or a named list of data.frames for multiple trials.
+A covariate data frame. The single-source covariate/distribution/
+sumstats format remains accepted; multi-source lists are rejected.
 }
 \description{
-Gaussian copula model for generating covariates
+Draw covariates from a single-source Gaussian copula
 }

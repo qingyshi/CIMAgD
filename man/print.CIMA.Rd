@@ -2,20 +2,36 @@
 % Please edit documentation in R/CIMA.R
 \name{print.CIMA}
 \alias{print.CIMA}
-\title{Print method for CIMA fit}
+\alias{coef.CIMA}
+\alias{vcov.CIMA}
+\alias{predict.CIMA}
+\title{Methods for a CIMA fit}
 \usage{
 \method{print}{CIMA}(x, digits = 4, ...)
+
+\method{coef}{CIMA}(object, ...)
+
+\method{vcov}{CIMA}(object, type = c("theta", "target"), ...)
+
+\method{predict}{CIMA}(object, newdata, time = NULL, ...)
 }
 \arguments{
-\item{x}{A fitted object returned by \code{\link[=CIMA]{CIMA()}}.}
+\item{x, object}{A fitted CIMA object.}
 
-\item{digits}{Number of digits to print.}
+\item{digits}{Number of printed decimal places.}
 
 \item{...}{Unused.}
+
+\item{type}{Covariance of theta or joint target estimates.}
+
+\item{newdata}{Covariate data frame for CATE prediction.}
+
+\item{time}{One observed horizon for a time-indexed fit.}
 }
 \value{
-Invisibly returns \code{x}.
+print invisibly returns x; coef returns coefficients; vcov returns a
+covariance matrix; predict returns fitted additive CATE values.
 }
 \description{
-Print method for CIMA fit
+Methods for a CIMA fit
 }

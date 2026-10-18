@@ -2,32 +2,163 @@
 % Please edit documentation in R/CIMA.R
 \name{CIMA}
 \alias{CIMA}
-\title{Causally-interpretable meta-analysis using aggregate data}
+\title{Causally interpretable meta-analysis of aggregate trial reports}
 \usage{
-CIMA(dataAgD, mu, Q, target, formulaCATE, formulaTilting, V = NULL)
+CIMA(
+  data_agd = NULL,
+  mu,
+  Q = NULL,
+  target = NULL,
+  formula_cate = NULL,
+  formula_tilting = NULL,
+  summaryX = NULL,
+  q_method = c("plugin", "bootstrap"),
+  outcome = c("auto", "binary", "continuous"),
+  trial_info = NULL,
+  Sigma = NULL,
+  mu_se = NULL,
+  W = NULL,
+  formula_control = NULL,
+  match_subgroup_proportions = FALSE,
+  time_indexed = FALSE,
+  target_times = NULL,
+  target_subgroups = list(),
+  q_target_shared = NULL,
+  jacobian_diagnostics = TRUE,
+  singularity_method = NULL,
+  tilting_diagnostics = FALSE,
+  gmm_method = c("one-step", "two-step"),
+  variance = TRUE,
+  bootstrap_reps = 200L,
+  bootstrap_mc_size = NULL,
+  seed = NULL,
+  control = list(),
+  dataAgD = NULL,
+  formulaCATE = NULL,
+  formulaTilting = NULL,
+  V = NULL
+)
 }
 \arguments{
-\item{dataAgD}{A data.frame with treatment effects and standard errors.
-The data.frame must contain columns: \code{trial}, \code{subgroup}, \code{stratum}, \code{TE},
-\code{seTE}, \code{n}, and \code{prop}. Columns \code{trial}, \code{subgroup}, \code{stratum}, \code{TE}, and
-\code{seTE} must not contain missing values. Columns \code{n} and \code{prop} may contain
-missing values.}
+\item{data_agd}{Contrast reports; see \code{\link[=prepare_agd]{prepare_agd()}}.}
 
-\item{mu}{A list of tilting targets for each trial.}
+\item{mu}{Named list of trial covariate moment vectors. Named vectors must
+match formula_tilting model-matrix columns; omit the fixed intercept or give
+it as 1. Unnamed vectors follow model-matrix order.}
 
-\item{Q}{A data.frame of covariates that represent a base distribution.}
+\item{Q}{Empirical base-distribution data frame. Supply either Q or summaryX.}
 
-\item{target}{A data.frame of covariates for the target population.}
+\item{target}{Target covariate data frame. NULL reuses Q, with joint inference.}
 
-\item{formulaCATE}{A character string of the formula for CATE.}
+\item{formula_cate}{One-sided linear basis formula, e.g. ~ x + z + x:z.}
 
-\item{formulaTilting}{A character string of the formula for tilting.}
+\item{formula_tilting}{One-sided formula with intercept, or a trial-named list.}
 
-\item{V}{A list of variance-covariance matrices of treatment effects. Maybe missing.}
+\item{summaryX}{Single-source Gaussian copula specification; see \code{\link[=XCopula]{XCopula()}}.}
+
+\item{q_method}{Copula uncertainty: plugin (default; fixed parameters and n
+iid draws), or bootstrap (refit margins and latent correlations each draw).}
+
+\item{outcome}{auto, binary, or continuous.}
+
+\item{trial_info}{Optional data frame with trial, n (total trial size), and
+allocation (treatment randomization probability). Otherwise inferred from
+overall reports or a disjoint exhaustive partition verified on Q.}
+
+\item{Sigma}{Optional trial-named list of full joint INFLUENCE covariance
+matrices, ordered as that trial's TE rows in input order followed by h+ in
+model-matrix order (including the fixed intercept). This is n_s times the
+sampling covariance, and the intercept row/column must be zero. Missing
+trials use A.6.2 reconstruction. Repeated horizons require joint Sigma.}
+
+\item{mu_se}{Optional trial-named vectors of covariate-summary SEs, excluding
+the intercept, in original tilting-basis order. NA uses working variances.}
+
+\item{W}{Optional positive-definite GMM weight. Default diagonal entries are
+inverse n_s*seTE^2; if any SE is zero, the default is identity.}
+
+\item{formula_control}{Optional working control regression formula or named
+list, used only for reconstructed variance. Default is the CATE basis.}
+
+\item{match_subgroup_proportions}{Add independent subgroup proportions to
+trial tilting moments. Default FALSE; conflicting counts/mu cause errors.}
+
+\item{time_indexed}{Enable Time in the CATE basis; FALSE by default, even if
+Time differs. TRUE with a formula omitting Time explicitly pools effects.}
+
+\item{target_times}{Observed horizons at which to estimate target effects;
+defaults to all observed times if time_indexed, otherwise 1.}
+
+\item{target_subgroups}{Named list of functions of target returning logical
+membership, including joint subgroups. Overall is always included.}
+
+\item{q_target_shared}{NULL detects exact Q/target reuse. TRUE declares exact
+row-aligned reuse; FALSE declares independent samples. Partial overlap is
+not inferred or handled by the independent-sample variance formula.}
+
+\item{jacobian_diagnostics}{Report Jacobian rank/conditioning diagnostics;
+TRUE by default. Necessary numerical rank checks remain active when FALSE.}
+
+\item{singularity_method}{Singular-system handling: none, minimum-norm, or
+ridge. NULL selects none when jacobian_diagnostics=TRUE, minimum-norm
+otherwise. Explicit none always stops on singularity. Minimum-norm uses
+Moore-Penrose solutions in the original parameter coordinates. Ridge uses
+dimensionless penalties after scaling, only for singular systems.}
+
+\item{tilting_diagnostics}{Compute the A.4.1 sufficient-span diagnostic;
+FALSE by default. It cannot establish that A6 fails.}
+
+\item{gmm_method}{One-step (default) or two-step. Two-step uses the estimated
+full moment sampling covariance to construct its second-stage weight.
+Redundant covariance directions are removed; informative zero-variance
+directions require ridge or a one-step analysis. Covariance estimation is
+needed for two-step even if variance=FALSE.}
+
+\item{variance}{Calculate variance (default TRUE). FALSE permits point-only
+fits when cross-time covariance or feasible working risk models are absent.}
+
+\item{bootstrap_reps}{Number of copula refit replicates, default 200.}
+
+\item{bootstrap_mc_size}{Numerical integration size for bootstrap, default
+max(10000, 2*summaryX$n). Common Gaussian draws are reused for integration
+across refits to reduce numerical noise. Only bootstrap uses this setting.}
+
+\item{seed}{Optional local RNG seed.}
+
+\item{control}{Named numerical controls: rank_tol=1e-9, condition_limit=1e8,
+tilt_tol=1e-10, span_tol=1e-8, max_iter=200, ridge_strength=1e-8. The latter
+is dimensionless; GMM adds it to the column-normalized Gram matrix and H
+adds it to its diagonal-normalized Gram matrix.}
+
+\item{dataAgD, formulaCATE, formulaTilting}{Legacy argument aliases.}
+
+\item{V}{Retired treatment-effect-only covariance argument. Use joint Sigma.}
 }
 \value{
-A object of CIMA.
+A CIMA object with CATE, ATE, joint target estimates, normalized
+reports, tilting fits, Jacobians, influence/variance components, diagnostics
+and copula metadata. Reconstruction is a working approximation under raw
+complete-outcome randomized-trial influence functions, not exact inference
+for arbitrary adjusted or censored estimates. Continuous reconstruction
+assumes arm-specific constant conditional residual variances. If a singular
+system is regularized, ordinary identification-based covariance and Wald
+intervals are withheld; numerical sensitivity covariance is stored separately.
 }
 \description{
-Causally-interpretable meta-analysis using aggregate data
+Fits a linear-in-parameters additive CATE with normalized exponentially tilted
+subgroup moments. Implements the main estimator and Appendices A.1, A.3,
+A.4.1, A.6.1 and the arm-report case of A.6.2 of the paper.
+}
+\examples{
+reports <- data.frame(
+  trial = "s1", subgroup = c("overall", "x", "x"),
+  stratum = c("TRUE", "x == 0", "x == 1"),
+  event1 = c(30, 10, 20), n1 = c(100, 50, 50),
+  event2 = c(20, 5, 15), n2 = c(100, 50, 50)
+)
+fit <- CIMA(reports, mu = list(s1 = c(x = .5)),
+  Q = data.frame(x = rep(0:1, each = 100)),
+  formula_cate = ~ x, formula_tilting = ~ x)
+coef(fit)
+fit$target$estimates
 }

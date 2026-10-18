@@ -1,118 +1,81 @@
-# internal helper: trial sample size per trial
-trial_n_map <- function(dataAgD) {
-  trials <- unique(as.character(dataAgD$trial))
-  out <- stats::setNames(rep(1, length(trials)), trials)
+make_basis_spec <- function(formula, Q, times, time_indexed) {
+  f <- as_rhs_formula(formula, "formula_cate")
+  if (!time_indexed && "Time" %in% all.vars(f)) stop("Set time_indexed=TRUE to use Time in formula_cate.", call. = FALSE)
+  stacked <- do.call(rbind, lapply(times, function(tt) {
+    d <- Q
+    if (time_indexed) d$Time <- tt
+    d
+  }))
+  mf <- stats::model.frame(f, stacked, na.action = stats::na.pass)
+  b <- stats::model.matrix(f, mf)
+  if (nrow(b) != nrow(stacked) || any(!is.finite(b)) || !ncol(b))
+    stop("formula_cate must produce a finite nonempty basis.", call. = FALSE)
+  xlev <- lapply(mf[vapply(mf, is.factor, logical(1))], levels)
+  blocks <- lapply(seq_along(times), function(k) b[(k - 1L) * nrow(Q) + seq_len(nrow(Q)), , drop = FALSE])
+  names(blocks) <- as.character(times)
+  list(formula = f, xlev = xlev, contrasts = attr(b, "contrasts"), columns = colnames(b),
+       basis_q = blocks, times = times, time_indexed = time_indexed)
+}
 
-  if (!("n" %in% names(dataAgD))) {
-    return(out)
+new_basis <- function(spec, data, time) {
+  if (spec$time_indexed) data$Time <- time
+  mf <- stats::model.frame(spec$formula, data, xlev = spec$xlev, na.action = stats::na.pass)
+  b <- stats::model.matrix(spec$formula, mf, contrasts.arg = spec$contrasts)
+  if (!identical(colnames(b), spec$columns) || nrow(b) != nrow(data) || any(!is.finite(b)))
+    stop("New covariates do not match the fitted CATE basis.", call. = FALSE)
+  b
+}
+
+build_moments <- function(d, indicators, tilting, spec) {
+  n_q <- nrow(indicators); J <- nrow(d)
+  alpha <- matrix(0, n_q, J, dimnames = dimnames(indicators))
+  c_sj <- numeric(J)
+  for (s in names(tilting)) {
+    idx <- which(d$trial == s)
+    wi <- indicators[, idx, drop = FALSE] * tilting[[s]]$weights
+    c_sj[idx] <- colMeans(wi)
+    if (any(c_sj[idx] <= 1e-12)) stop("Empty or negligible tilted Q support for ",
+      paste(d$row_id[idx[c_sj[idx] <= 1e-12]], collapse = ", "), call. = FALSE)
+    alpha[, idx] <- sweep(wi, 2, c_sj[idx], "/")
   }
-
-  for (s in trials) {
-    ds <- dataAgD[dataAgD$trial == s, , drop = FALSE]
-    n_s <- NA_real_
-    if ("subgroup" %in% names(ds)) {
-      n_s <- ds$n[which(ds$subgroup == "overall")[1]]
-    }
-    if (is.na(n_s) || !is.finite(n_s) || n_s <= 0) {
-      n_s <- suppressWarnings(max(ds$n, na.rm = TRUE))
-    }
-    if (!is.finite(n_s) || n_s <= 0) {
-      n_s <- 1
-    }
-    out[s] <- n_s
+  row_times <- if (spec$time_indexed) as.character(d$Time) else rep("1", J)
+  J_m_theta <- matrix(0, J, length(spec$columns), dimnames = list(d$row_id, spec$columns))
+  for (tt in names(spec$basis_q)) {
+    idx <- which(row_times == tt)
+    if (length(idx)) J_m_theta[idx, ] <- crossprod(alpha[, idx, drop = FALSE], spec$basis_q[[tt]]) / n_q
   }
-  out
+  list(alpha = alpha, c_sj = c_sj, J_m_theta = J_m_theta, row_times = row_times)
 }
 
-
-# internal helper: build alpha(x, eta) matrix
-alpha_matrix <- function(dataAgD, IMat, weightsMat) {
-  trials <- unique(as.character(dataAgD$trial))
-  J <- nrow(dataAgD)
-  n_q <- nrow(IMat[[1]])
-  A <- matrix(0, nrow = n_q, ncol = J)
-
-  for (s in trials) {
-    idx <- which(as.character(dataAgD$trial) == s)
-    I_s <- IMat[[s]]
-    w_s <- weightsMat[[s]]
-    prop_s <- dataAgD$prop[idx]
-    prop_s[is.na(prop_s) | prop_s <= 0] <- 1
-    A[, idx] <- sweep(I_s * w_s, 2, prop_s, "/")
-  }
-  A
-}
-
-
-# internal helper: sample moment vector
-moment_vector <- function(theta, designMat, IMat, weightsMat, dataAgD) {
-  g <- as.numeric(designMat %*% theta)
-  alpha <- alpha_matrix(dataAgD = dataAgD, IMat = IMat, weightsMat = weightsMat)
-  colMeans(alpha * g)
-}
-
-
-# internal helper: GMM residual moment vector
-moment_residual <- function(theta, designMat, IMat, weightsMat, dataAgD) {
-  moment_vector(theta, designMat, IMat, weightsMat, dataAgD) - as.numeric(dataAgD$TE)
-}
-
-
-# internal helper: Jacobian matrix D for theta
-DthetaMat <- function(designMat, IMat, weightsMat, dataAgD) {
-  alpha <- alpha_matrix(dataAgD = dataAgD, IMat = IMat, weightsMat = weightsMat)
-  crossprod(alpha, designMat) / nrow(designMat)
-}
-
-
-#' Weighting matrix W
-#'
-#' @param dataAgD A data.frame with treatment effects and standard errors.
-#' @param V A list of variance-covariance matrices.
-#'
-#' @returns The weighting matrix.
-#'
-WMat <- function(dataAgD, V = NULL) {
-  eps <- 1e-8
-  trials <- unique(as.character(dataAgD$trial))
-  n_map <- trial_n_map(dataAgD)
-  J <- nrow(dataAgD)
-  W <- matrix(0, nrow = J, ncol = J)
-
-  for (i in seq_along(trials)) {
-    s <- trials[i]
-    idx <- which(as.character(dataAgD$trial) == s)
-    n_s <- n_map[s]
-
-    if (!is.null(V)) {
-      Vs <- if (!is.null(names(V)) && s %in% names(V)) V[[s]] else V[[i]]
-      V_report <- as.matrix(Vs)
+fit_gmm <- function(d, moments, trial_info, W, control, weight_psd = FALSE) {
+  J <- nrow(d); D <- moments$J_m_theta
+  diagnostics <- jacobian_report(D, "J_m_theta", control, scaled_svd(D, control$rank_tol)$rank)
+  weight_note <- "User-supplied positive-definite W."
+  if (is.null(W)) {
+    n_s <- trial_info$n[match(d$trial, trial_info$trial)]
+    variances <- n_s * d$seTE^2
+    if (any(variances == 0)) {
+      W <- diag(J); weight_note <- "Identity W: at least one reported contrast SE is zero."
     } else {
-      se <- as.numeric(dataAgD$seTE[idx])
-      V_report <- diag(se^2, nrow = length(se))
+      W <- diag(1 / variances, J); weight_note <- "Diagonal inverse n_s * seTE^2."
     }
-
-    # Keep user row order from dataAgD by inserting trial block at its native indices.
-    W[idx, idx] <- solve(n_s * V_report + diag(eps, nrow(V_report)))
   }
-
-  W
-}
-
-
-#' Generalized method of moments
-#'
-#' @param theta A parameter vector.
-#' @param W A weighting matrix.
-#' @param designMat A design matrix.
-#' @param IMat A list of indicator matrices.
-#' @param weightsMat A list of tilting weights matrices.
-#' @param dataAgD A data.frame with treatment effects and standard errors.
-#'
-#' @returns The GMM loss.
-#' @export gmmFun
-#'
-gmmFun <- function(theta, W, designMat, IMat, weightsMat, dataAgD) {
-  m <- moment_residual(theta, designMat, IMat, weightsMat, dataAgD)
-  as.numeric(t(m) %*% W %*% m)
+  W <- validate_covariance(W, J, "W", positive = !weight_psd)
+  if (weight_psd) {
+    e <- eigen(W, symmetric = TRUE)
+    L <- sqrt(pmax(e$values, 0)) * t(e$vectors)
+  } else L <- chol(W)
+  a <- L %*% D
+  solution <- least_squares_operator(a, "Weighted J_m_theta", control)
+  theta <- as.vector(solution$inverse %*% L %*% d$TE)
+  names(theta) <- colnames(D)
+  J_theta_m <- -solution$inverse %*% L
+  dimnames(J_theta_m) <- list(colnames(D), d$row_id)
+  m_hat <- as.vector(D %*% theta)
+  residual <- m_hat - d$TE
+  list(theta = theta, W = W, weight_note = weight_note, m_hat = m_hat,
+       residual = residual, foc = as.vector(crossprod(D, W %*% residual)),
+       objective = as.numeric(crossprod(residual, W %*% residual)),
+       J_theta_m = J_theta_m, diagnostics = diagnostics,
+       regularization = solution[c("method", "used", "rank", "ridge", "scales")])
 }

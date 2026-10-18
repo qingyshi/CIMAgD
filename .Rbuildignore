@@ -2,3 +2,6 @@
 ^\.Rproj\.user$
 ^LICENSE\.md$
 ^README\.Rmd$
+^data/.*[.]rds$
+^.*[.]Rcheck$
+^CIMAgD_.*[.]tar[.]gz$
