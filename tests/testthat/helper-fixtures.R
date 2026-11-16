@@ -29,6 +29,17 @@ fit_small <- function(outcome = "binary", saturated = TRUE, ...) {
   do.call(CIMA, c(small_example(outcome, saturated), list(...)))
 }
 
+# Two trials sharing the small design; the second has different arm reports.
+two_trials <- function(outcome = "binary") {
+  a <- small_example(outcome, saturated = FALSE)
+  b <- a$data_agd; b$trial <- "s2"
+  if (outcome == "binary") {
+    b$event1 <- pmin(b$n1, round(b$event1 * 1.15)); b$event2 <- round(b$event2 * .9)
+  } else b$mean1 <- b$mean1 + c(.2, .1, .3, .25, .15)
+  a$data_agd <- rbind(a$data_agd, b); a$mu$s2 <- a$mu$s1
+  a
+}
+
 small_copula <- function(n = 600L) list(n = n,
   marginals = data.frame(variable = c("x", "z"), distribution = "bernoulli", mean = c(.45, .55)),
   correlation = matrix(c(1, .2, .2, 1), 2))

@@ -28,6 +28,7 @@ CIMA(
   singularity_method = NULL,
   tilting_diagnostics = FALSE,
   gmm_method = c("one-step", "two-step"),
+  method = c("common", "MVLP"),
   variance = TRUE,
   bootstrap_reps = 200L,
   bootstrap_mc_size = NULL,
@@ -69,16 +70,24 @@ overall reports or a disjoint exhaustive partition verified on Q.}
 matrices, ordered as that trial's TE rows in input order followed by h+ in
 model-matrix order (including the fixed intercept). This is n_s times the
 sampling covariance, and the intercept row/column must be zero. Missing
-trials use A.6.2 reconstruction. Repeated horizons require joint Sigma.}
+trials use A.6.3 reconstruction. Repeated horizons require joint Sigma.}
 
 \item{mu_se}{Optional trial-named vectors of covariate-summary SEs, excluding
 the intercept, in original tilting-basis order. NA uses working variances.}
 
-\item{W}{Optional positive-definite GMM weight. Default diagonal entries are
-inverse n_s*seTE^2; if any SE is zero, the default is identity.}
+\item{W}{Optional positive-definite GMM weight in report-row order. Default
+diagonal entries are inverse n_s*seTE^2; if any SE is zero, the default is
+identity (decided within each trial for MVLP). MVLP uses only the
+trial-diagonal blocks of a supplied W.}
 
 \item{formula_control}{Optional working control regression formula or named
-list, used only for reconstructed variance. Default is the CATE basis.}
+list, used only for reconstructed variance (A.6.3). Default is the CATE
+basis. Each trial first fits its own working control mean. A trial whose
+own fit fails or is unstable (unidentified working terms, ill-conditioning,
+active risk bounds, or zero continuous residual variance) automatically
+uses a common working mean fitted to every trial's control-arm reports, if
+that fit is no less stable; other trials keep their own fits. The choice is
+recorded in \code{variance$working_control}.}
 
 \item{match_subgroup_proportions}{Add independent subgroup proportions to
 trial tilting moments. Default FALSE; conflicting counts/mu cause errors.}
@@ -90,7 +99,8 @@ Time differs. TRUE with a formula omitting Time explicitly pools effects.}
 defaults to all observed times if time_indexed, otherwise 1.}
 
 \item{target_subgroups}{Named list of functions of target returning logical
-membership, including joint subgroups. Overall is always included.}
+membership, including joint subgroups. Overall is always included. With
+MVLP, each subgroup effect is pooled across trials with its own weights.}
 
 \item{q_target_shared}{NULL detects exact Q/target reuse. TRUE declares exact
 row-aligned reuse; FALSE declares independent samples. Partial overlap is
@@ -109,13 +119,24 @@ dimensionless penalties after scaling, only for singular systems.}
 FALSE by default. It cannot establish that A6 fails.}
 
 \item{gmm_method}{One-step (default) or two-step. Two-step uses the estimated
-full moment sampling covariance to construct its second-stage weight.
-Redundant covariance directions are removed; informative zero-variance
-directions require ridge or a one-step analysis. Covariance estimation is
-needed for two-step even if variance=FALSE.}
+full moment sampling covariance to construct its second-stage weight; with
+MVLP, each trial inverts its own moment covariance block. Redundant
+covariance directions are removed; informative zero-variance directions
+require ridge or a one-step analysis. Covariance estimation is needed for
+two-step even if variance=FALSE.}
+
+\item{method}{\code{"common"} (default): one CATE shared by all trials (A1-A6).
+\code{"MVLP"}: trial-specific CATEs, each identified from its own trial's
+reports, transported to the target and combined by minimum-variance linear
+pooling (A.7: A1p, A2p, and A4-A6 within each trial). Every trial must
+identify the CATE basis; the moment-Jacobian rank is checked per trial.
+Pooling weights need the joint covariance of the trial-specific estimates,
+which is therefore computed even when variance=FALSE.}
 
 \item{variance}{Calculate variance (default TRUE). FALSE permits point-only
-fits when cross-time covariance or feasible working risk models are absent.}
+one-step common-CATE fits when cross-time covariance or feasible working
+risk models are absent. Two-step and MVLP fits still compute the covariance
+for their weights but do not report it.}
 
 \item{bootstrap_reps}{Number of copula refit replicates, default 200.}
 
@@ -128,7 +149,8 @@ across refits to reduce numerical noise. Only bootstrap uses this setting.}
 \item{control}{Named numerical controls: rank_tol=1e-9, condition_limit=1e8,
 tilt_tol=1e-10, span_tol=1e-8, max_iter=200, ridge_strength=1e-8. The latter
 is dimensionless; GMM adds it to the column-normalized Gram matrix and H
-adds it to its diagonal-normalized Gram matrix.}
+adds it to its diagonal-normalized Gram matrix. condition_limit also flags
+ill-conditioned working control regressions.}
 
 \item{dataAgD, formulaCATE, formulaTilting}{Legacy argument aliases.}
 
@@ -137,17 +159,34 @@ adds it to its diagonal-normalized Gram matrix.}
 \value{
 A CIMA object with CATE, ATE, joint target estimates, normalized
 reports, tilting fits, Jacobians, influence/variance components, diagnostics
-and copula metadata. Reconstruction is a working approximation under raw
-complete-outcome randomized-trial influence functions, not exact inference
-for arbitrary adjusted or censored estimates. Continuous reconstruction
-assumes arm-specific constant conditional residual variances. If a singular
-system is regularized, ordinary identification-based covariance and Wald
-intervals are withheld; numerical sensitivity covariance is stored separately.
+and copula metadata. \code{diagnostics$identification} gives the moment-Jacobian
+rank (one row per trial for MVLP) and \code{variance$working_control} the working
+control model used for each trial. For MVLP, \code{CATE$theta} stacks the
+trial-specific coefficients (named \code{trial:term}) and \code{\link[=coef]{coef()}} returns them
+as a term-by-trial matrix; \code{target$estimates} and \code{target$vcov} hold the
+pooled target effects; \code{target$trial_estimates} and \code{target$trial_vcov} the
+trial-specific transported effects with their joint covariance; \code{pooling}
+the minimum-variance weights for each estimand; and \code{ATE$by_trial} the
+trial-specific overall effects. Reconstruction is a working approximation
+under raw complete-outcome randomized-trial influence functions, not exact
+inference for arbitrary adjusted or censored estimates. Continuous
+reconstruction assumes arm-specific constant conditional residual variances.
+If a singular system is regularized, ordinary identification-based
+covariance and Wald intervals are withheld; numerical sensitivity covariance
+is stored separately.
 }
 \description{
 Fits a linear-in-parameters additive CATE with normalized exponentially tilted
-subgroup moments. Implements the main estimator and Appendices A.1, A.3,
-A.4.1, A.6.1 and the arm-report case of A.6.2 of the paper.
+subgroup moments and averages it over a target population. Implements the
+main estimator and Appendices A.1, A.3, A.4.1, A.6.1, A.6.3 and A.7 of the
+paper. \code{method = "common"} (default) estimates one CATE common to all trials
+from their stacked moments. \code{method = "MVLP"} estimates a separate CATE for
+each trial, marginalizes each over the target population, and combines the
+trial-specific transported effects by minimum-variance linear pooling (A.7).
+Relative effects (A.2), the misspecification-robust variance (A.6.2), the
+conditional arm-mean estimator (A.8) and indirect treatment comparisons are
+not implemented; A.8-type working control means serve only the A.6.3
+covariance reconstruction.
 }
 \examples{
 reports <- data.frame(
@@ -161,4 +200,17 @@ fit <- CIMA(reports, mu = list(s1 = c(x = .5)),
   formula_cate = ~ x, formula_tilting = ~ x)
 coef(fit)
 fit$target$estimates
+
+# Trial-specific CATEs pooled by minimum-variance linear pooling
+two <- rbind(reports, data.frame(
+  trial = "s2", subgroup = c("overall", "x", "x"),
+  stratum = c("TRUE", "x == 0", "x == 1"),
+  event1 = c(45, 20, 25), n1 = c(150, 90, 60),
+  event2 = c(30, 12, 18), n2 = c(150, 90, 60)))
+pooled <- CIMA(two, mu = list(s1 = c(x = .5), s2 = c(x = .4)),
+  Q = data.frame(x = rep(0:1, each = 100)),
+  formula_cate = ~ x, formula_tilting = ~ x, method = "MVLP")
+coef(pooled)
+pooled$target$trial_estimates
+pooled$target$estimates
 }

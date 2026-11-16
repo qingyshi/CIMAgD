@@ -1,7 +1,7 @@
 # Moment-based first-stage bootstrap weights avoid nested bootstrap fitting.
 prepare_copula_bootstrap <- function(spec, noise, B, d, mu, formula_cate, formula_tilting,
                                      trial_info, match_proportions, time_indexed, times,
-                                     W, control, theta_reference) {
+                                     W, control, theta_reference, method = "common") {
   summaries <- vector("list", B); moments <- vector("list", B); failures <- character(B)
   control$jacobian_diagnostics <- FALSE
   for (b in seq_len(B)) {
@@ -10,8 +10,8 @@ prepare_copula_bootstrap <- function(spec, noise, B, d, mu, formula_cate, formul
       refitted <- refit_copula(source, spec)
       core <- fit_cima_core(d, copula_from_noise(refitted, noise), mu, formula_cate,
         formula_tilting, trial_info, match_proportions, time_indexed, times, W,
-        control, diagnostics = FALSE)
-      list(summary = refitted, moment = as.vector(core$context$moments$J_m_theta %*% theta_reference))
+        control, diagnostics = FALSE, method = method)
+      list(summary = refitted, moment = as.vector(core$fit$design %*% theta_reference))
     }, error = function(e) e)
     if (inherits(value, "error")) failures[b] <- conditionMessage(value) else {
       summaries[[b]] <- value$summary; moments[[b]] <- value$moment
@@ -32,7 +32,7 @@ check_bootstrap_success <- function(ok, failures, B, warn = TRUE) {
 bootstrap_copula <- function(spec, noise, B, d, mu, formula_cate, formula_tilting,
                              trial_info, match_proportions, time_indexed, times,
                              W, control, target, shared, target_times, subgroups,
-                             prepared = NULL, weight_psd = FALSE, theta_reference) {
+                             prepared = NULL, weight_psd = FALSE, theta_reference, method = "common") {
   draws <- summaries <- moments <- vector("list", B); failures <- character(B)
   control$jacobian_diagnostics <- FALSE
   for (b in seq_len(B)) {
@@ -46,11 +46,12 @@ bootstrap_copula <- function(spec, noise, B, d, mu, formula_cate, formula_tiltin
       }
       Q_b <- copula_from_noise(refitted, noise)
       core <- fit_cima_core(d, Q_b, mu, formula_cate, formula_tilting, trial_info,
-        match_proportions, time_indexed, times, W, control, diagnostics = FALSE, weight_psd = weight_psd)
+        match_proportions, time_indexed, times, W, control, diagnostics = FALSE,
+        weight_psd = weight_psd, method = method)
       target_b <- if (shared) Q_b else target
-      tf <- fit_target(target_b, core$context$basis, core$fit$theta, target_times, subgroups, NULL, shared)
+      tf <- fit_target(target_b, core$context$basis, core$fit, target_times, subgroups, NULL, shared)
       list(theta = core$fit$theta, target = stats::setNames(tf$estimates$estimate, rownames(tf$J_psi_theta)),
-           summary = refitted, moment = as.vector(core$context$moments$J_m_theta %*% theta_reference))
+           summary = refitted, moment = as.vector(core$fit$design %*% theta_reference))
     }, error = function(e) e)
     if (inherits(value, "error")) failures[b] <- conditionMessage(value) else {
       draws[[b]] <- c(value$theta, value$target); summaries[[b]] <- value$summary; moments[[b]] <- value$moment

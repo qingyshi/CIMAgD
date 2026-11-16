@@ -11,7 +11,7 @@
 
 \method{coef}{CIMA}(object, ...)
 
-\method{vcov}{CIMA}(object, type = c("theta", "target"), ...)
+\method{vcov}{CIMA}(object, type = c("theta", "target", "trial"), ...)
 
 \method{predict}{CIMA}(object, newdata, time = NULL, ...)
 }
@@ -22,15 +22,17 @@
 
 \item{...}{Unused.}
 
-\item{type}{Covariance of theta or joint target estimates.}
+\item{type}{Covariance of theta, of the (pooled) target estimates, or, for
+MVLP, of the trial-specific transported estimates (\code{"trial"}).}
 
 \item{newdata}{Covariate data frame for CATE prediction.}
 
 \item{time}{One observed horizon for a time-indexed fit.}
 }
 \value{
-print invisibly returns x; coef returns coefficients; vcov returns a
-covariance matrix; predict returns fitted additive CATE values.
+print invisibly returns x; coef returns coefficients (a term-by-trial
+matrix for MVLP); vcov returns a covariance matrix; predict returns fitted
+additive CATE values (one column per trial for MVLP).
 }
 \description{
 Methods for a CIMA fit

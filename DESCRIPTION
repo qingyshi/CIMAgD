@@ -1,10 +1,13 @@
 Package: CIMAgD
 Title: Causally Interpretable Meta-Analysis Using Aggregate Data
-Version: 0.1.0
+Version: 0.1.1
 Authors@R:
     person("Qingyang", "Shi", , "qingyang.shi@rug.nl", role = c("aut", "cre"))
 Description: Estimates conditional treatment effects and target-population treatment
-    effects from randomized-trial aggregate reports using generalized method of moments.
+    effects from randomized-trial aggregate reports using generalized method of moments,
+    either with one conditional treatment effect function common to all trials or with
+    trial-specific functions whose transported effects are combined by minimum-variance
+    linear pooling.
 License: AGPL (>= 3)
 Encoding: UTF-8
 LazyData: true

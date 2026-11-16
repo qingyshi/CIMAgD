@@ -72,13 +72,14 @@ symmetric_inverse <- function(a, label, control, report = TRUE) {
        method = method, used = rank < ncol(a), ridge = lambda, scales = scale)
 }
 
-optimal_weight <- function(covariance, jacobian, control) {
-  covariance <- validate_covariance(covariance, nrow(jacobian), "Moment sampling covariance")
+optimal_weight <- function(covariance, jacobian, control, label = "Moment sampling covariance") {
+  covariance <- validate_covariance(covariance, nrow(jacobian), label)
   sd <- sqrt(pmax(diag(covariance), 0)); sd[sd == 0] <- 1
   correlation <- symmetrize(covariance / outer(sd, sd))
   e <- eigen(correlation, symmetric = TRUE)
   keep <- e$values > max(e$values, 0) * control$rank_tol
-  if (!any(keep)) stop("Two-step GMM needs a nonzero moment covariance; use one-step GMM for deterministic moments.", call. = FALSE)
+  if (!any(keep)) stop("Two-step GMM needs a nonzero moment covariance (", label,
+    "); use one-step GMM for deterministic moments.", call. = FALSE)
   lambda <- 0
   if (!all(keep)) {
     D <- sweep(jacobian, 1, sd, "/")
@@ -86,7 +87,7 @@ optimal_weight <- function(covariance, jacobian, control) {
     informative_null <- max(abs(crossprod(e$vectors[, !keep, drop = FALSE],
       sweep(D, 2, columns, "/")))) > sqrt(control$rank_tol)
     if (informative_null && control$singularity_method != "ridge")
-      stop("Moment covariance has informative zero-variance directions. Use one-step GMM or singularity_method='ridge'.", call. = FALSE)
+      stop(label, " has informative zero-variance directions. Use one-step GMM or singularity_method='ridge'.", call. = FALSE)
     if (informative_null) lambda <- control$ridge_strength
   }
   inverse <- if (lambda > 0) solve(correlation + diag(lambda, nrow(correlation))) else
@@ -94,4 +95,52 @@ optimal_weight <- function(covariance, jacobian, control) {
   W <- symmetrize(inverse / outer(sd, sd))
   list(W = W, covariance = covariance, rank = sum(keep), ridge = lambda,
        method = if (lambda > 0) "scaled ridge" else if (all(keep)) "inverse" else "inverse on covariance range")
+}
+
+# Two-step weights per CATE block. For MVLP each trial's second-stage weight is
+# the inverse of that trial's own moment covariance block, so every trial-specific
+# CATE remains a separate GMM fit as in A.7.
+optimal_weight_blocks <- function(covariance, B, blocks, control) {
+  if (!is_trial_blocks(blocks)) return(optimal_weight(covariance, B, control))
+  covariance <- validate_covariance(covariance, nrow(B), "Moment sampling covariance")
+  W <- matrix(0, nrow(B), nrow(B))
+  parts <- lapply(blocks, function(blk) {
+    r <- blk$rows
+    optimal_weight(covariance[r, r, drop = FALSE], B[r, , drop = FALSE], control,
+                   paste0("Moment sampling covariance for trial ", blk$name))
+  })
+  for (k in seq_along(blocks)) W[blocks[[k]]$rows, blocks[[k]]$rows] <- parts[[k]]$W
+  methods <- unique(vapply(parts, `[[`, character(1), "method"))
+  list(W = W, covariance = covariance, rank = sum(vapply(parts, `[[`, numeric(1), "rank")),
+       ridge = max(vapply(parts, `[[`, numeric(1), "ridge")),
+       method = paste("trial-specific", paste(methods, collapse = "/")), by_trial = parts)
+}
+
+# A.7 minimum-variance linear pooling weights w = V^{-1}1 / (1'V^{-1}1).
+minimum_variance_weights <- function(V, control, label) {
+  M <- nrow(V)
+  if (M == 1L) return(list(weights = 1, variance = V[1, 1], status = "single trial", regularized = FALSE))
+  if (any(!is.finite(V))) stop("Pooling covariance for ", label, " is not finite.", call. = FALSE)
+  V <- symmetrize(V)
+  sd <- sqrt(pmax(diag(V), 0))
+  scale <- ifelse(sd > 0, sd, 1)
+  correlation <- V / outer(scale, scale)
+  e <- eigen(correlation, symmetric = TRUE)
+  rank <- if (all(sd > 0)) sum(e$values > max(e$values, 0) * control$rank_tol) else 0L
+  if (rank == M) {
+    x <- solve(V, rep(1, M))
+    return(list(weights = x / sum(x), variance = 1 / sum(x), status = "positive definite", regularized = FALSE))
+  }
+  if ((control$singularity_method %||% "none") == "none")
+    stop(structure(list(message = paste0("Covariance of the trial-specific transported estimates for ", label,
+      " is singular, so minimum-variance pooling weights are not unique. Check zero-variance reports or ",
+      "choose an explicit singularity method."), call = NULL, matrix_name = paste("Pooling covariance for", label),
+      diagnostics = list(eigenvalues = e$values, sd = sd)), class = c("cima_singularity", "error", "condition")))
+  ev <- eigen(V, symmetric = TRUE)
+  keep <- ev$values > max(ev$values, 0) * control$rank_tol
+  x <- if (any(keep)) as.vector(ev$vectors[, keep, drop = FALSE] %*%
+    (crossprod(ev$vectors[, keep, drop = FALSE], rep(1, M)) / ev$values[keep])) else rep(0, M)
+  weights <- if (abs(sum(x)) > sqrt(.Machine$double.eps) * max(1, sum(abs(x)))) x / sum(x) else rep(1 / M, M)
+  list(weights = weights, variance = as.numeric(crossprod(weights, V %*% weights)),
+       status = "singular covariance: Moore-Penrose weights", regularized = TRUE)
 }

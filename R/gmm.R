@@ -47,35 +47,99 @@ build_moments <- function(d, indicators, tilting, spec) {
   list(alpha = alpha, c_sj = c_sj, J_m_theta = J_m_theta, row_times = row_times)
 }
 
-fit_gmm <- function(d, moments, trial_info, W, control, weight_psd = FALSE) {
-  J <- nrow(d); D <- moments$J_m_theta
-  diagnostics <- jacobian_report(D, "J_m_theta", control, scaled_svd(D, control$rank_tol)$rank)
-  weight_note <- "User-supplied positive-definite W."
-  if (is.null(W)) {
-    n_s <- trial_info$n[match(d$trial, trial_info$trial)]
-    variances <- n_s * d$seTE^2
-    if (any(variances == 0)) {
-      W <- diag(J); weight_note <- "Identity W: at least one reported contrast SE is zero."
+# CATE parameter blocks. The common method uses one CATE for every moment. MVLP
+# (A.7) uses one CATE per trial: stacking the trial parameters with a
+# block-diagonal moment Jacobian and weight reproduces the separate trial-specific
+# GMM fits exactly, while the shared Q/target influences remain jointly available.
+cate_blocks <- function(d, columns, method = "common") {
+  p <- length(columns)
+  if (method == "common")
+    return(list(common = list(name = "common", rows = seq_len(nrow(d)),
+                              columns = seq_len(p), labels = columns)))
+  trials <- unique(d$trial)
+  stats::setNames(lapply(seq_along(trials), function(k) list(name = trials[k],
+    rows = which(d$trial == trials[k]), columns = (k - 1L) * p + seq_len(p),
+    labels = paste0(trials[k], ":", columns))), trials)
+}
+
+is_trial_blocks <- function(blocks) !identical(names(blocks), "common")
+
+# Moment Jacobian with respect to the stacked parameter (J x P).
+cate_design <- function(B, blocks) {
+  labels <- unlist(lapply(blocks, `[[`, "labels"), use.names = FALSE)
+  D <- matrix(0, nrow(B), length(labels), dimnames = list(rownames(B), labels))
+  for (blk in blocks) D[blk$rows, blk$columns] <- B[blk$rows, , drop = FALSE]
+  D
+}
+
+default_weight <- function(d, trial_info, blocks) {
+  J <- nrow(d)
+  variances <- trial_info$n[match(d$trial, trial_info$trial)] * d$seTE^2
+  W <- matrix(0, J, J)
+  notes <- character()
+  # The identity fallback is decided within each separately fitted CATE block.
+  for (blk in blocks) {
+    r <- blk$rows
+    if (any(variances[r] == 0)) {
+      W[r, r] <- diag(length(r)); notes[blk$name] <- "Identity W: at least one reported contrast SE is zero."
     } else {
-      W <- diag(1 / variances, J); weight_note <- "Diagonal inverse n_s * seTE^2."
+      W[r, r] <- diag(1 / variances[r], length(r)); notes[blk$name] <- "Diagonal inverse n_s * seTE^2."
     }
   }
-  W <- validate_covariance(W, J, "W", positive = !weight_psd)
-  if (weight_psd) {
-    e <- eigen(W, symmetric = TRUE)
-    L <- sqrt(pmax(e$values, 0)) * t(e$vectors)
-  } else L <- chol(W)
-  a <- L %*% D
-  solution <- least_squares_operator(a, "Weighted J_m_theta", control)
-  theta <- as.vector(solution$inverse %*% L %*% d$TE)
-  names(theta) <- colnames(D)
-  J_theta_m <- -solution$inverse %*% L
-  dimnames(J_theta_m) <- list(colnames(D), d$row_id)
+  note <- if (is_trial_blocks(blocks)) paste0(names(notes), ": ", notes, collapse = " ") else unname(notes)
+  list(W = W, note = note)
+}
+
+fit_gmm <- function(d, moments, trial_info, W, control, weight_psd = FALSE, blocks = NULL) {
+  J <- nrow(d); B <- moments$J_m_theta
+  blocks <- blocks %||% cate_blocks(d, colnames(B))
+  by_trial <- is_trial_blocks(blocks)
+  D <- cate_design(B, blocks)
+  if (is.null(W)) {
+    default <- default_weight(d, trial_info, blocks)
+    W <- default$W; weight_note <- default$note
+  } else {
+    W <- validate_covariance(W, J, "W", positive = !weight_psd)
+    weight_note <- if (by_trial) "User-supplied W; MVLP uses its trial-diagonal blocks." else "User-supplied positive-definite W."
+    if (by_trial) {
+      diagonal <- matrix(0, J, J)
+      for (blk in blocks) diagonal[blk$rows, blk$rows] <- W[blk$rows, blk$rows]
+      W <- diagonal
+    }
+  }
+  theta <- stats::setNames(numeric(ncol(D)), colnames(D))
+  J_theta_m <- matrix(0, ncol(D), J, dimnames = list(colnames(D), d$row_id))
+  diagnostics <- regularization <- list()
+  identification <- vector("list", length(blocks))
+  for (k in seq_along(blocks)) {
+    blk <- blocks[[k]]; r <- blk$rows
+    Db <- B[r, , drop = FALSE]
+    label <- if (by_trial) paste0("J_m_theta for trial ", blk$name) else "J_m_theta"
+    rank <- scaled_svd(Db, control$rank_tol)$rank
+    report <- jacobian_report(Db, label, control, rank)
+    diagnostics[blk$name] <- list(report)
+    Wb <- W[r, r, drop = FALSE]
+    if (weight_psd) {
+      e <- eigen(Wb, symmetric = TRUE)
+      L <- sqrt(pmax(e$values, 0)) * t(e$vectors)
+    } else L <- chol(Wb)
+    solution <- least_squares_operator(L %*% Db, paste("Weighted", label), control)
+    theta[blk$columns] <- as.vector(solution$inverse %*% L %*% d$TE[r])
+    J_theta_m[blk$columns, r] <- -solution$inverse %*% L
+    regularization[[blk$name]] <- solution[c("method", "used", "rank", "ridge", "scales")]
+    identification[[k]] <- data.frame(block = blk$name, moments = length(r), parameters = ncol(Db),
+      rank = rank, condition = if (is.null(report)) NA_real_ else report$condition,
+      status = if (is.null(report)) if (rank < ncol(Db)) "singular" else "not assessed" else report$status)
+  }
   m_hat <- as.vector(D %*% theta)
   residual <- m_hat - d$TE
+  identification <- do.call(rbind, identification); rownames(identification) <- NULL
+  if (by_trial) names(identification)[1L] <- "trial"
   list(theta = theta, W = W, weight_note = weight_note, m_hat = m_hat,
        residual = residual, foc = as.vector(crossprod(D, W %*% residual)),
        objective = as.numeric(crossprod(residual, W %*% residual)),
-       J_theta_m = J_theta_m, diagnostics = diagnostics,
-       regularization = solution[c("method", "used", "rank", "ridge", "scales")])
+       J_theta_m = J_theta_m, blocks = blocks, design = D, identification = identification,
+       diagnostics = if (by_trial) { if (all(vapply(diagnostics, is.null, logical(1)))) NULL else diagnostics } else diagnostics$common,
+       regularization = if (by_trial) list(method = control$singularity_method %||% "none",
+         used = any(vapply(regularization, `[[`, logical(1), "used")), by_trial = regularization) else regularization$common)
 }
